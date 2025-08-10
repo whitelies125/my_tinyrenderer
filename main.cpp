@@ -1,5 +1,9 @@
+#include <algorithm>
+
+#include "geometry.h"
 #include "model.h"
 #include "tgaimage.h"
+
 // BGRA = blue green read alpha(不透明度)
 const TGAColor white = TGAColor {255, 255, 255, 255};
 const TGAColor blue = TGAColor {255, 0, 0, 255};
@@ -233,13 +237,191 @@ void load_model()
     delete model;
     return;
 }
+
+void line6(Vec2i t0, Vec2i t1, TGAImage &image, TGAColor color)
+{
+    line5(t0.x, t0.y, t1.x, t1.y, image, color);
+}
+
+// 线扫描法 line sweeping
+// 算出起点终点，按起点终点的 x 轴为起止，按线段逐像素扫描
+void triangle1(Vec2i t0, Vec2i t1, Vec2i t2, TGAImage &image, TGAColor color)
+{
+    // make t0.y <= t1.y <= t2.y
+    if (t0.y > t1.y) std::swap(t0, t1);
+    if (t0.y > t2.y) std::swap(t0, t2);
+    if (t1.y > t2.y) std::swap(t1, t2);
+    int total_height = t2.y - t0.y;
+    for (int y = t0.y; y < t1.y; y++) {
+        int part_height = t1.y - t0.y + 1;  // 加 1 防止除以 0 异常了
+        float k02 = (y - t0.y) / static_cast<float>(total_height);
+        float k01 = (y - t0.y) / static_cast<float>(part_height);
+        Vec2i a = t0 + (t2 - t0) * k02;
+        Vec2i b = t0 + (t1 - t0) * k01;
+        if (a.x > b.x) std::swap(a, b);
+        for (int x = a.x; x < b.x; x++) {
+            image.set(x, y, color);
+        }
+    }
+    for (int y = t1.y; y < t2.y; y++) {
+        int part_height = t2.y - t1.y + 1;  // 加 1 防止除以 0 异常了
+        float k02 = (y - t0.y) / static_cast<float>(total_height);
+        float k12 = (y - t1.y) / static_cast<float>(part_height);
+        Vec2i a = t0 + (t2 - t0) * k02;
+        Vec2i b = t1 + (t2 - t1) * k12;
+        if (a.x > b.x) std::swap(a, b);
+        for (int x = a.x; x < b.x; x++) {
+            image.set(x, y, color);
+        }
+    }
+    return;
+}
+
+// 计算重心坐标
+Vec3f barycentric(Vec2i t0, Vec2i t1, Vec2i t2, Vec2i p)
+{
+    Vec3f u =
+        Vec3f(t2.x - t0.x, t1.x - t0.x, t0.x - p.x) ^ Vec3f(t2.y - t0.y, t1.y - t0.y, t0.y - p.y);
+    // 处理 t0,t1,t2 为直线的 corner case
+    // 因 t0,t1,t2,p 都是整型坐标，只可能是整数
+    // 因此 abs (u.z) < 1 即 aob(u.z) == 0，即三角形退化为直线，在这种情况下返回负坐标
+    if (std::abs(u.z) < 1) return Vec3f(-1, 1, 1);
+    return Vec3f(1.0 - (u.x + u.y) / u.z, u.y / u.z, u.x / u.z);
+}
+
+// 边界框光栅化 Bounding Box Rasterization
+// 逐像素判断其重心坐标是否在三角形内，若是则处理，否则不处理
+void triangle2(Vec2i t0, Vec2i t1, Vec2i t2, TGAImage &image, TGAColor color)
+{
+    // 计算边界框的范围，左下角起点坐标 box_min，右上角终点坐标 box_max
+    Vec2i box_min {image.width() - 1, image.height() - 1};
+    Vec2i box_max {0, 0};
+    box_min.x = std::clamp(std::min({box_min.x, t0.x, t1.x, t2.x}), 0, image.width() - 1);
+    box_min.y = std::clamp(std::min({box_min.y, t0.y, t1.y, t2.y}), 0, image.height() - 1);
+    box_max.x = std::clamp(std::max({box_max.x, t0.x, t1.x, t2.x}), 0, image.width() - 1);
+    box_max.y = std::clamp(std::max({box_max.y, t0.y, t1.y, t2.y}), 0, image.height() - 1);
+
+    // 遍历边界框内像素点是否在三角形内
+    Vec2i p;
+    for (p.x = box_min.x; p.x <= box_max.x; p.x++) {
+        for (p.y = box_min.y; p.y <= box_max.y; p.y++) {
+            Vec3f vec = barycentric(t0, t1, t2, p);
+            if (vec.x < 0 || vec.y < 0 || vec.z < 0) continue;
+            image.set(p.x, p.y, color);
+        }
+    }
+    return;
+}
+
+void lesson2_try1()
+{
+    TGAImage image(200, 200, TGAImage::RGB);
+    Vec2i t0[3] = {Vec2i(10, 70), Vec2i(50, 160), Vec2i(70, 80)};
+    Vec2i t1[3] = {Vec2i(180, 50), Vec2i(150, 1), Vec2i(70, 180)};
+    Vec2i t2[3] = {Vec2i(180, 150), Vec2i(120, 160), Vec2i(130, 180)};
+    triangle1(t0[0], t0[1], t0[2], image, red);
+    triangle1(t1[0], t1[1], t1[2], image, white);
+    triangle1(t2[0], t2[1], t2[2], image, green);
+    image.write_tga_file("line_sweeping.tga");
+    return;
+}
+
+void lesson2_try2()
+{
+    TGAImage image(200, 200, TGAImage::RGB);
+    Vec2i t0[3] = {Vec2i(10, 70), Vec2i(50, 160), Vec2i(70, 80)};
+    Vec2i t1[3] = {Vec2i(180, 50), Vec2i(150, 1), Vec2i(70, 180)};
+    Vec2i t2[3] = {Vec2i(180, 150), Vec2i(120, 160), Vec2i(130, 180)};
+    triangle2(t0[0], t0[1], t0[2], image, red);
+    triangle2(t1[0], t1[1], t1[2], image, white);
+    triangle2(t2[0], t2[1], t2[2], image, green);
+    image.write_tga_file("bounding_box.tga");
+    return;
+}
+
+// 加载模型，每个三角形面使用随机颜色绘制
+void load_model_and_random_color()
+{
+    Model *model = new Model("obj/african_head.obj");
+    constexpr int width = 800;
+    constexpr int height = 800;
+    TGAImage image(width, height, TGAImage::RGB);
+    for (int i = 0; i < model->nfaces(); i++) {
+        std::vector<int> face = model->face(i);
+        Vec2i vertex[3];
+        for (int j = 0; j < 3; j++) {
+            Vec3f v = model->vert(face[j]);
+            int x = (v.x + 1.0) * width / 2.;
+            int y = (v.y + 1.0) * height / 2.;
+            vertex[j] = {x, y};
+        }
+        TGAColor color;
+        color.bgra[0] = rand() % 255;
+        color.bgra[1] = rand() % 255;
+        color.bgra[2] = rand() % 255;
+        color.bgra[3] = 255;
+        triangle1(vertex[0], vertex[1], vertex[2], image, color);
+    }
+    image.write_tga_file("african_head_random_color.tga");
+    delete model;
+    return;
+}
+
+// 添加平行光，计算每个三角形面的光强度
+void load_model_and_light()
+{
+    Model *model = new Model("obj/african_head.obj");
+    constexpr int width = 800;
+    constexpr int height = 800;
+    TGAImage image(width, height, TGAImage::RGB);
+
+    // 定义一个平行光，照向 -z 方向
+    Vec3f light_dir {0, 0, -1};
+    for (int i = 0; i < model->nfaces(); i++) {
+        std::vector<int> face = model->face(i);
+        Vec2i screen_coords[3];
+        Vec3f world_coords[3];
+        for (int j = 0; j < 3; j++) {
+            Vec3f v = model->vert(face[j]);
+            int x = (v.x + 1.0) * width / 2.0;
+            int y = (v.y + 1.0) * height / 2.0;
+            screen_coords[j] = {x, y};
+            world_coords[j] = v;
+        }
+        // 计算三角形面的法向量
+        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
+        n.normalize();
+        // 计算法向量与平行光的夹角，决定了三角形面的亮度
+        float intensity = n * light_dir;
+        // 如果点乘大于 0，光源对该平面的照射方向与法向量同向
+        // 说明光源对该平面的照射方向是从后往前的，因此忽略不处理，正常而言，你看不见物体背后的光照效果
+        if (intensity > 0) {
+            TGAColor color;
+            color.bgra[0] = intensity * 255;
+            color.bgra[1] = intensity * 255;
+            color.bgra[2] = intensity * 255;
+            color.bgra[3] = 255;
+            triangle1(screen_coords[0], screen_coords[1], screen_coords[2], image, color);
+        }
+    }
+    image.write_tga_file("african_head_light.tga");
+    delete model;
+    return;
+}
+
 int main(int argc, char **argv)
 {
+    // lesson 1
     try1();
     try2();
     try3();
     try4();
     try5();
     load_model();
+    // lesson 2
+    lesson2_try1();
+    lesson2_try2();
+    load_model_and_random_color();
+    load_model_and_light();
     return 0;
 }
