@@ -247,15 +247,16 @@ void line6(Vec2i t0, Vec2i t1, TGAImage &image, TGAColor color)
 // 算出起点终点，按起点终点的 x 轴为起止，按线段逐像素扫描
 void triangle1(Vec2i t0, Vec2i t1, Vec2i t2, TGAImage &image, TGAColor color)
 {
+    if (t0.y == t1.y && t0.y == t2.y) return;  // 为线段时不处理
     // make t0.y <= t1.y <= t2.y
     if (t0.y > t1.y) std::swap(t0, t1);
     if (t0.y > t2.y) std::swap(t0, t2);
     if (t1.y > t2.y) std::swap(t1, t2);
     int total_height = t2.y - t0.y;
     for (int y = t0.y; y < t1.y; y++) {
-        int part_height = t1.y - t0.y + 1;  // 加 1 防止除以 0 异常了
-        float k02 = (y - t0.y) / static_cast<float>(total_height);
-        float k01 = (y - t0.y) / static_cast<float>(part_height);
+        int part_height = t1.y == t0.y ? 1 : t1.y - t0.y;  // 防止除 0 异常
+        float k02 = static_cast<float>(y - t0.y) / total_height;
+        float k01 = static_cast<float>(y - t0.y) / part_height;
         Vec2i a = t0 + (t2 - t0) * k02;
         Vec2i b = t0 + (t1 - t0) * k01;
         if (a.x > b.x) std::swap(a, b);
@@ -264,9 +265,9 @@ void triangle1(Vec2i t0, Vec2i t1, Vec2i t2, TGAImage &image, TGAColor color)
         }
     }
     for (int y = t1.y; y < t2.y; y++) {
-        int part_height = t2.y - t1.y + 1;  // 加 1 防止除以 0 异常了
-        float k02 = (y - t0.y) / static_cast<float>(total_height);
-        float k12 = (y - t1.y) / static_cast<float>(part_height);
+        int part_height = t2.y == t1.y ? 1 : t2.y - t1.y;  // 防止除 0 异常
+        float k02 = static_cast<float>(y - t0.y) / total_height;
+        float k12 = static_cast<float>(y - t1.y) / part_height;
         Vec2i a = t0 + (t2 - t0) * k02;
         Vec2i b = t1 + (t2 - t1) * k12;
         if (a.x > b.x) std::swap(a, b);
@@ -293,6 +294,7 @@ Vec3f barycentric(Vec2i t0, Vec2i t1, Vec2i t2, Vec2i p)
 // 逐像素判断其重心坐标是否在三角形内，若是则处理，否则不处理
 void triangle2(Vec2i t0, Vec2i t1, Vec2i t2, TGAImage &image, TGAColor color)
 {
+    if (t0.y == t1.y && t0.y == t2.y) return;  // 为线段时不处理
     // 计算边界框的范围，左下角起点坐标 box_min，右上角终点坐标 box_max
     Vec2i box_min {image.width() - 1, image.height() - 1};
     Vec2i box_max {0, 0};
@@ -360,7 +362,7 @@ void load_model_and_random_color()
         color.bgra[1] = rand() % 255;
         color.bgra[2] = rand() % 255;
         color.bgra[3] = 255;
-        triangle1(vertex[0], vertex[1], vertex[2], image, color);
+        triangle2(vertex[0], vertex[1], vertex[2], image, color);
     }
     image.write_tga_file("african_head_random_color.tga");
     delete model;
@@ -401,7 +403,7 @@ void load_model_and_light()
             color.bgra[1] = intensity * 255;
             color.bgra[2] = intensity * 255;
             color.bgra[3] = 255;
-            triangle1(screen_coords[0], screen_coords[1], screen_coords[2], image, color);
+            triangle2(screen_coords[0], screen_coords[1], screen_coords[2], image, color);
         }
     }
     image.write_tga_file("african_head_light.tga");
