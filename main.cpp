@@ -411,6 +411,83 @@ void load_model_and_light()
     return;
 }
 
+// z_buffer
+// 记录像素点的 z 轴深度信息从而处理遮挡关系
+void triangle3(Vec2i screen_coords[3], Vec3f world_coords[3],
+               std::vector<std::vector<float>> &z_buffer, TGAImage &image, TGAColor color)
+{
+    const auto &sc = screen_coords;
+    if (sc[0].y == sc[1].y && sc[0].y == sc[2].y) return;  // 为线段时不处理
+    // 计算边界框的范围，左下角起点坐标 box_min，右上角终点坐标 box_max
+    Vec2i box_min {image.width() - 1, image.height() - 1};
+    Vec2i box_max {0, 0};
+    box_min.x = std::clamp(std::min({box_min.x, sc[0].x, sc[1].x, sc[2].x}), 0, image.width() - 1);
+    box_min.y = std::clamp(std::min({box_min.y, sc[0].y, sc[1].y, sc[2].y}), 0, image.height() - 1);
+    box_max.x = std::clamp(std::max({box_max.x, sc[0].x, sc[1].x, sc[2].x}), 0, image.width() - 1);
+    box_max.y = std::clamp(std::max({box_max.y, sc[0].y, sc[1].y, sc[2].y}), 0, image.height() - 1);
+
+    // 遍历边界框内像素点是否在三角形内
+    Vec2i p;
+    const auto &wc = world_coords;
+    for (p.x = box_min.x; p.x <= box_max.x; p.x++) {
+        for (p.y = box_min.y; p.y <= box_max.y; p.y++) {
+            Vec3f vec = barycentric(sc[0], sc[1], sc[2], p);
+            if (vec.x < 0 || vec.y < 0 || vec.z < 0) continue;
+            // 计算重心坐标的 z
+            float z = vec.x * wc[0].z + vec.y * wc[1].z + vec.z * wc[2].z;
+            // 只处理该像素点 z 轴最前面的三角形面，即重心坐标 z 最大的三角形面
+            if (z < z_buffer[p.x][p.y]) continue;
+            z_buffer[p.x][p.y] = z;
+            image.set(p.x, p.y, color);
+        }
+    }
+    return;
+}
+
+void load_model_and_z_buffer()
+{
+    Model *model = new Model("obj/african_head.obj");
+    constexpr int width = 800;
+    constexpr int height = 800;
+    TGAImage image(width, height, TGAImage::RGB);
+
+    // 有个小坑，浮点数的 min() 返回的是最小正数，得用 lowest() 才是负的最小值
+    float lowest = std::numeric_limits<float>::lowest();
+    // 记录像素点 z 轴深度信息
+    std::vector<std::vector<float>> z_buffer(width, std::vector<float>(height, lowest));
+    // 定义一个平行光，照向 -z 方向
+    Vec3f light_dir {0, 0, -1};
+    for (int i = 0; i < model->nfaces(); i++) {
+        std::vector<int> face = model->face(i);
+        Vec2i screen_coords[3];
+        Vec3f world_coords[3];
+        for (int j = 0; j < 3; j++) {
+            Vec3f v = model->vert(face[j]);
+            int x = (v.x + 1.0) * width / 2.0;
+            int y = (v.y + 1.0) * height / 2.0;
+            screen_coords[j] = {x, y};
+            world_coords[j] = v;
+        }
+        // 计算三角形面的法向量
+        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
+        n.normalize();
+        // 计算法向量与平行光的夹角，决定了三角形面的亮度
+        float intensity = n * light_dir;
+        // 如果点乘大于 0，光源对该平面的照射方向与法向量同向
+        // 说明光源对该平面的照射方向是从后往前的，因此忽略不处理，正常而言，你看不见物体背后的光照效果
+        if (intensity > 0) {
+            TGAColor color;
+            color.bgra[0] = intensity * 255;
+            color.bgra[1] = intensity * 255;
+            color.bgra[2] = intensity * 255;
+            color.bgra[3] = 255;
+            triangle3(screen_coords, world_coords, z_buffer, image, color);
+        }
+    }
+    image.write_tga_file("african_head_z_buffer.tga");
+    delete model;
+    return;
+}
 int main(int argc, char **argv)
 {
     // lesson 1
@@ -425,5 +502,7 @@ int main(int argc, char **argv)
     lesson2_try2();
     load_model_and_random_color();
     load_model_and_light();
+    // lesson 3
+    load_model_and_z_buffer();
     return 0;
 }
