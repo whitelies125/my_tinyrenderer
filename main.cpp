@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <array>
+#include <iostream>
 
 #include "geometry.h"
 #include "model.h"
@@ -488,6 +490,356 @@ void load_model_and_z_buffer()
     delete model;
     return;
 }
+
+constexpr int dim = 4;
+template <typename T>
+class Matrix4 {
+public:
+    Matrix4() {}
+    Matrix4(const std::initializer_list<std::initializer_list<T>> &init_list)
+    {
+        *this = init_list;  // 复用 operator=()
+    }
+    void init_E()
+    {
+        for (int i = 0; i < dim; i++)
+            for (int j = 0; j < dim; j++) {
+                m_[i][j] = (i == j ? 1.0f : 0.0f);
+            }
+    }
+    Matrix4 &operator=(const std::initializer_list<std::initializer_list<T>> &init_list)
+    {
+        int i = 0;
+        for (const auto &item : init_list) {
+            int j = 0;
+            for (const auto &it : item) {
+                m_[i][j] = static_cast<T>(it);
+                j++;
+            }
+            i++;
+        }
+        return *this;
+    }
+    auto &operator[](int i) { return m_[i]; }
+    const auto &operator[](int i) const { return m_[i]; }
+    template <typename V>
+    V operator*(const V &vec)
+    {
+        V ret;
+        for (int i = 0; i < dim; i++) {
+            for (int j = 0; j < dim; j++) {
+                ret.raw[i] += m_[i][j] * vec.raw[j];
+            }
+        }
+        return ret;
+    }
+    Matrix4 operator*(const Matrix4 &rhs)
+    {
+        Matrix4 ret;
+        for (int i = 0; i < dim; i++) {
+            for (int j = 0; j < dim; j++) {
+                ret[i][j] = 0.0f;
+                for (int k = 0; k < dim; k++) {
+                    ret[i][j] += m_[i][k] * rhs[k][j];
+                }
+            }
+        }
+        return ret;
+    }
+    template <typename U>
+    friend std::ostream &operator<<(std::ostream &s, Matrix4<U> &rhs);
+
+private:
+    std::array<std::array<T, dim>, dim> m_;
+};
+
+template <typename U>
+std::ostream &operator<<(std::ostream &cout, Matrix4<U> &rhs)
+{
+    for (int i = 0; i < dim; i++) {
+        for (int j = 0; j < dim; j++) {
+            std::cout << rhs.m_[i][j] << ", ";
+        }
+        std::cout << std::endl;
+    }
+    return cout;
+}
+
+using Matrix4f = Matrix4<float>;
+
+template <class T>
+struct Vec4 {
+    union {
+        struct {
+            T x, y, z, w;
+        };
+        T raw[4];
+    };
+    Vec4() : x(0), y(0), z(0), w(0) {}
+    Vec4(T _x, T _y, T _z, T _w) : x(_x), y(_y), z(_z), w(_w) {}
+    Vec4<T> operator*(float f) const { return Vec4<T>(x * f, y * f, z * f, w * f); }
+    template <typename U>
+    friend std::ostream &operator<<(std::ostream &s, Vec4<U> &v);
+};
+
+template <typename U>
+std::ostream &operator<<(std::ostream &s, Vec4<U> &v)
+{
+    s << "(" << v.x << ", " << v.y << ", " << v.z << ", " << v.w << ")\n";
+    return s;
+}
+
+typedef Vec4<float> Vec4f;
+typedef Vec4<int> Vec4i;
+
+Matrix4f get_model_trans()
+{
+    // 缩放: x,y 缩放 0.5
+    float k = 0.5;
+    Matrix4f scale = {{k, 0, 0, 0}, {0, k, 0, 0}, {0, 0, k, 0}, {0, 0, 0, 1}};
+    // 旋转: 绕 y 轴逆时针旋转 90 度
+    Matrix4f rotate = {{0, 0, 1, 0}, {0, 1, 0, 0}, {-1, 0, 0, 0}, {0, 0, 0, 1}};
+    // 平移: x 轴平移 0.5
+    Matrix4f translation = {{1, 0, 0, 0.5}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
+
+    // 注意，变换顺序不同，结果不同
+    Matrix4f model_trans = translation * rotate * scale;
+    return model_trans;
+}
+
+// 模型变换
+void model_transformation()
+{
+    Model *model = new Model("obj/african_head.obj");
+    constexpr int width = 800;
+    constexpr int height = 800;
+    TGAImage image(width, height, TGAImage::RGB);
+
+    Matrix4f model_trans = get_model_trans();
+
+    float lowest = std::numeric_limits<float>::lowest();
+    std::vector<std::vector<float>> z_buffer(width, std::vector<float>(height, lowest));
+    // 定义一个平行光，照向 -z 方向
+    Vec3f light_dir {0, 0, -1};
+    for (int i = 0; i < model->nfaces(); i++) {
+        std::vector<int> face = model->face(i);
+        Vec2i screen_coords[3];
+        Vec3f world_coords[3];
+        for (int j = 0; j < 3; j++) {
+            Vec3f v_origin = model->vert(face[j]);
+            // 转化为齐次坐标
+            Vec4f v_homo = Vec4f {v_origin.x, v_origin.y, v_origin.z, 1.0f};
+            // 模型变换，将物体放置在合适的位置
+            Vec4f v_model = model_trans * v_homo;
+            int x = (v_model.x + 1.0) * width / 2.0;
+            int y = (v_model.y + 1.0) * height / 2.0;
+            screen_coords[j] = {x, y};
+            world_coords[j] = {v_model.x, v_model.y, v_model.z};
+        }
+        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
+        n.normalize();
+        float intensity = n * light_dir;
+        // 如果点乘大于 0，光源对该平面的照射方向与法向量同向
+        // 说明光源对该平面的照射方向是从后往前的，因此忽略不处理，正常而言，你看不见物体背后的光照效果
+        if (intensity > 0) {
+            TGAColor color;
+            color.bgra[0] = intensity * 255;
+            color.bgra[1] = intensity * 255;
+            color.bgra[2] = intensity * 255;
+            color.bgra[3] = 255;
+            triangle3(screen_coords, world_coords, z_buffer, image, color);
+        }
+    }
+    image.write_tga_file("african_head_model_trans.tga");
+    delete model;
+    return;
+}
+
+Matrix4f get_view_trans(Vec3f camera, Vec3f front, Vec3f up)
+{
+    // 注意这里是 面朝方向 叉乘 头顶方向，得到摄像机右手方向
+    // 因此摄像机的坐标系基向量为（右，上，前），需将这三个基向量分别对齐 x轴，y轴，-z轴
+    Vec3f right = front ^ up;  // x
+
+    // 摄像机位于 (1,0,0)，看向 -x 方向，头顶向 +y 方向
+    // Vec3f camera = {1, 0, 0};
+    // Vec3f front = {-1, 0, 0};  // -z
+    // Vec3f up = {0, 1, 0};      // y
+    // Vec3f right = front ^ up;   // x
+
+    // 摄像机位于 (-1,0,0)，看向 +x 方向，头顶向 +y 方向
+    // Vec3f camera = {-1, 0, 0};
+    // Vec3f front = {1, 0, 0};  // -z
+    // Vec3f up = {0, 1, 0};     // y
+    // Vec3f right = front ^ up;   // x
+
+    // 摄像机位于 (0,0,1)，看向 -z 方向，头顶向 +y 方向
+    // Vec3f camera = {0, 0, 1};
+    // Vec3f front = {0, 0, -1};  // -z
+    // Vec3f up = {0, 1, 0};      // y
+    // Vec3f right = front ^ up;   // x
+
+    // 摄像机位于 (1,1,1)，看向 (-1,-1,-1) 方向，头顶向 (-1,1,-1) 方向
+    // Vec3f camera = {1, 1, 1};
+    // Vec3f front = {-1, -1, -1};  // -z
+    // Vec3f up = {-1, 1, -1};      // y
+    // Vec3f right = front ^ up;  // x
+
+    // 单位化为单位向量
+    front.normalize();
+    up.normalize();
+    right.normalize();
+
+    // 平移: 将摄像机移动至原点
+    Matrix4f view_t = {
+        {1.0f, 0, 0, -camera.x}, {0.0f, 1, 0, -camera.y}, {0.0f, 0, 1, -camera.z}, {0.0f, 0, 0, 1}};
+    // 旋转: 将摄像机坐标系的基向量对齐基向量
+    // 先写出 x,y,z 轴基向量旋转为摄像机坐标系基向量的旋转矩阵
+    // 注意各基向量对齐对应的向量 x->right, y->up，-z->front
+    // Matrix4f view_r_1 = {{right.x, up.x, -front.x, 0},
+    //                    {right.y, up.y, -front.y, 0},
+    //                    {right.z, up.z, -front.z, 0},
+    //                    {0, 0, 0, 1}};
+    // 求逆，对于正交矩阵，求逆等同于求其转置矩阵，因此 view_r = view_r_1 的转置
+    Matrix4f view_r = {{right.x, right.y, right.z, 0},
+                       {up.x, up.y, up.z, 0},
+                       {-front.x, -front.y, -front.z, 0},
+                       {0, 0, 0, 1}};
+    Matrix4f view_trans = view_r * view_t;
+    return view_trans;
+}
+
+// 视角变换，摄像机变换
+void view_transformation()
+{
+    Model *model = new Model("obj/african_head.obj");
+    constexpr int width = 800;
+    constexpr int height = 800;
+    TGAImage image(width, height, TGAImage::RGB);
+
+    Matrix4f model_trans = get_model_trans();
+
+    // 摄像机位于 (1,1,1)，看向 (-1,-1,-1) 方向，头顶向 (-1,1,-1) 方向
+    Vec3f camera = {1, 1, 1};    // x
+    Vec3f front = {-1, -1, -1};  // z
+    Vec3f up = {-1, 1, -1};      // y
+    Matrix4f view_trans = get_view_trans(camera, front, up);
+
+    float lowest = std::numeric_limits<float>::lowest();
+    std::vector<std::vector<float>> z_buffer(width, std::vector<float>(height, lowest));
+    // 定义一个平行光，照向 -z 方向
+    Vec3f light_dir = {0, 0, -1};  // 这个函数中，视角变换并没有计算并改变 light_dir
+                                   // 这也就意味着经过变换后计算光照时，始终是从摄像机背后照向前方
+    for (int i = 0; i < model->nfaces(); i++) {
+        std::vector<int> face = model->face(i);
+        Vec2i screen_coords[3];
+        Vec3f world_coords[3];
+        for (int j = 0; j < 3; j++) {
+            Vec3f v_origin = model->vert(face[j]);
+            // 转化为齐次坐标
+            Vec4f v_homo = Vec4f {v_origin.x, v_origin.y, v_origin.z, 1.0f};
+            // 模型变换，将物体放置在合适的位置
+            Vec4f v_model = model_trans * v_homo;
+            // 视图变换，从摄像机角度看到的视角
+            Vec4f v_view = view_trans * v_model;
+            int x = (v_view.x + 1.0) * width / 2.0;
+            int y = (v_view.y + 1.0) * height / 2.0;
+            screen_coords[j] = {x, y};
+            world_coords[j] = {v_view.x, v_view.y, v_view.z};
+        }
+        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
+        n.normalize();
+        float intensity = n * light_dir;
+        // 如果点乘大于 0，光源对该平面的照射方向与法向量同向
+        // 说明光源对该平面的照射方向是从后往前的，因此忽略不处理，正常而言，你看不见物体背后的光照效果
+        if (intensity > 0) {
+            TGAColor color;
+            color.bgra[0] = intensity * 255;
+            color.bgra[1] = intensity * 255;
+            color.bgra[2] = intensity * 255;
+            color.bgra[3] = 255;
+            triangle3(screen_coords, world_coords, z_buffer, image, color);
+        }
+    }
+    image.write_tga_file("african_head_view_trans.tga");
+    delete model;
+    return;
+}
+
+// 透视投影稍微有点麻烦，等后面有空在写
+// void project_transformation() {}
+
+constexpr int depth = 255;
+Matrix4f get_viewport_trans(int x, int y, int w, int h)
+{
+    Matrix4f viewport_trans;
+    viewport_trans.init_E();
+    // 平移
+    viewport_trans[0][3] = x + w / 2.f;
+    viewport_trans[1][3] = y + h / 2.f;
+    viewport_trans[2][3] = depth / 2.f;
+    // 缩放
+    viewport_trans[0][0] = w / 2.f;
+    viewport_trans[1][1] = h / 2.f;
+    viewport_trans[2][2] = depth / 2.f;
+    return viewport_trans;
+}
+
+// 视口变换
+void viewport_transformation()
+{
+    Model *model = new Model("obj/african_head.obj");
+    constexpr int width = 800;
+    constexpr int height = 800;
+    TGAImage image(width, height, TGAImage::RGB);
+
+    Matrix4f model_trans;
+    model_trans.init_E();
+    // 摄像机位于 (0,0,1)，看向 -z 方向，头顶向 +y 方向
+    Vec3f camera = {0, 0, 1};  // x
+    Vec3f front = {0, 0, -1};  // -z
+    Vec3f up = {0, 1, 0};      // y
+    Matrix4f view_trans = get_view_trans(camera, front, up);
+    Matrix4f viewport_trans =
+        get_viewport_trans(width / 8, height / 8, width * 3 / 4, height * 3 / 4);
+
+    float lowest = std::numeric_limits<float>::lowest();
+    std::vector<std::vector<float>> z_buffer(width, std::vector<float>(height, lowest));
+    Vec3f light_dir = {0, 0, -1};
+    for (int i = 0; i < model->nfaces(); i++) {
+        std::vector<int> face = model->face(i);
+        Vec2i screen_coords[3];
+        Vec3f world_coords[3];
+        for (int j = 0; j < 3; j++) {
+            Vec3f v_origin = model->vert(face[j]);
+            // 转化为齐次坐标
+            Vec4f v_homo = Vec4f {v_origin.x, v_origin.y, v_origin.z, 1.0f};
+            // 模型变换，将物体放置在合适的位置
+            Vec4f v_model = model_trans * v_homo;
+            // 视图变换，从摄像机角度看到的视角
+            Vec4f v_view = view_trans * v_model;
+            // 视口变换，映射到屏幕像素
+            Vec4f v_viewport = viewport_trans * v_view;
+            screen_coords[j] = {(int)v_viewport.x, (int)v_viewport.y};
+            world_coords[j] = {v_view.x, v_view.y, v_view.z};
+        }
+        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
+        n.normalize();
+        float intensity = n * light_dir;
+        if (intensity > 0) {
+            TGAColor color;
+            color.bgra[0] = intensity * 255;
+            color.bgra[1] = intensity * 255;
+            color.bgra[2] = intensity * 255;
+            color.bgra[3] = 255;
+            triangle3(screen_coords, world_coords, z_buffer, image, color);
+        }
+    }
+    image.write_tga_file("african_head_viewport_trans.tga");
+    delete model;
+    return;
+}
+
 int main(int argc, char **argv)
 {
     // lesson 1
@@ -504,5 +856,10 @@ int main(int argc, char **argv)
     load_model_and_light();
     // lesson 3
     load_model_and_z_buffer();
+    // lession 4
+    model_transformation();
+    view_transformation();
+    // project_transformation();
+    viewport_transformation();
     return 0;
 }
