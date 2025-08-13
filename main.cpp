@@ -167,7 +167,7 @@ void try1()
 {
     TGAImage image(100, 100, TGAImage::RGB);
     line1(13, 20, 80, 40, image, white);
-    // image.flip_vertically();  // 垂直翻转 左下角为原点
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("line1.tga");
     return;
 }
@@ -177,6 +177,7 @@ void try2()
     line2(13, 20, 80, 40, image, white);
     line2(20, 13, 40, 80, image, red);
     line2(80, 40, 13, 20, image, red);
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("line2.tga");
     return;
 }
@@ -186,6 +187,7 @@ void try3()
     line3(13, 20, 80, 40, image, white);
     line3(20, 13, 40, 80, image, red);
     line3(80, 40, 13, 20, image, red);
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("line3.tga");
     return;
 }
@@ -196,6 +198,7 @@ void try4()
     line4(13, 20, 80, 40, image, white);
     line4(20, 13, 40, 80, image, red);
     line4(80, 40, 13, 20, image, red);
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("line4.tga");
     return;
 }
@@ -206,6 +209,7 @@ void try5()
     line5(13, 20, 80, 40, image, white);
     line5(20, 13, 40, 80, image, red);
     line5(80, 40, 13, 20, image, red);
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("line5.tga");
     return;
 }
@@ -235,6 +239,7 @@ void load_model()
             line5(x0, y0, x1, y1, image, white);
         }
     }
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("african_head.tga");
     delete model;
     return;
@@ -283,8 +288,8 @@ void triangle1(Vec2i t0, Vec2i t1, Vec2i t2, TGAImage &image, TGAColor color)
 // 计算重心坐标
 Vec3f barycentric(Vec2i t0, Vec2i t1, Vec2i t2, Vec2i p)
 {
-    Vec3f u =
-        Vec3f(t2.x - t0.x, t1.x - t0.x, t0.x - p.x) ^ Vec3f(t2.y - t0.y, t1.y - t0.y, t0.y - p.y);
+    Vec3f u = cross(Vec3f(t2.x - t0.x, t1.x - t0.x, t0.x - p.x),
+                    Vec3f(t2.y - t0.y, t1.y - t0.y, t0.y - p.y));
     // 处理 t0,t1,t2 为直线的 corner case
     // 因 t0,t1,t2,p 都是整型坐标，只可能是整数
     // 因此 abs (u.z) < 1 即 aob(u.z) == 0，即三角形退化为直线，在这种情况下返回负坐标
@@ -298,12 +303,12 @@ void triangle2(Vec2i t0, Vec2i t1, Vec2i t2, TGAImage &image, TGAColor color)
 {
     if (t0.y == t1.y && t0.y == t2.y) return;  // 为线段时不处理
     // 计算边界框的范围，左下角起点坐标 box_min，右上角终点坐标 box_max
-    Vec2i box_min {image.width() - 1, image.height() - 1};
+    Vec2i box_min {image.get_width() - 1, image.get_height() - 1};
     Vec2i box_max {0, 0};
-    box_min.x = std::clamp(std::min({box_min.x, t0.x, t1.x, t2.x}), 0, image.width() - 1);
-    box_min.y = std::clamp(std::min({box_min.y, t0.y, t1.y, t2.y}), 0, image.height() - 1);
-    box_max.x = std::clamp(std::max({box_max.x, t0.x, t1.x, t2.x}), 0, image.width() - 1);
-    box_max.y = std::clamp(std::max({box_max.y, t0.y, t1.y, t2.y}), 0, image.height() - 1);
+    box_min.x = std::clamp(std::min({box_min.x, t0.x, t1.x, t2.x}), 0, image.get_width() - 1);
+    box_min.y = std::clamp(std::min({box_min.y, t0.y, t1.y, t2.y}), 0, image.get_height() - 1);
+    box_max.x = std::clamp(std::max({box_max.x, t0.x, t1.x, t2.x}), 0, image.get_width() - 1);
+    box_max.y = std::clamp(std::max({box_max.y, t0.y, t1.y, t2.y}), 0, image.get_height() - 1);
 
     // 遍历边界框内像素点是否在三角形内
     Vec2i p;
@@ -326,6 +331,7 @@ void lesson2_try1()
     triangle1(t0[0], t0[1], t0[2], image, red);
     triangle1(t1[0], t1[1], t1[2], image, white);
     triangle1(t2[0], t2[1], t2[2], image, green);
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("line_sweeping.tga");
     return;
 }
@@ -339,6 +345,7 @@ void lesson2_try2()
     triangle2(t0[0], t0[1], t0[2], image, red);
     triangle2(t1[0], t1[1], t1[2], image, white);
     triangle2(t2[0], t2[1], t2[2], image, green);
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("bounding_box.tga");
     return;
 }
@@ -366,6 +373,7 @@ void load_model_and_random_color()
         color.bgra[3] = 255;
         triangle2(vertex[0], vertex[1], vertex[2], image, color);
     }
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("african_head_random_color.tga");
     delete model;
     return;
@@ -393,7 +401,7 @@ void load_model_and_light()
             world_coords[j] = v;
         }
         // 计算三角形面的法向量
-        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
+        Vec3f n = cross(world_coords[2] - world_coords[0], world_coords[1] - world_coords[0]);
         n.normalize();
         // 计算法向量与平行光的夹角，决定了三角形面的亮度
         float intensity = n * light_dir;
@@ -408,6 +416,7 @@ void load_model_and_light()
             triangle2(screen_coords[0], screen_coords[1], screen_coords[2], image, color);
         }
     }
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("african_head_light.tga");
     delete model;
     return;
@@ -421,12 +430,16 @@ void triangle3(Vec2i screen_coords[3], Vec3f world_coords[3],
     const auto &sc = screen_coords;
     if (sc[0].y == sc[1].y && sc[0].y == sc[2].y) return;  // 为线段时不处理
     // 计算边界框的范围，左下角起点坐标 box_min，右上角终点坐标 box_max
-    Vec2i box_min {image.width() - 1, image.height() - 1};
+    Vec2i box_min {image.get_width() - 1, image.get_height() - 1};
     Vec2i box_max {0, 0};
-    box_min.x = std::clamp(std::min({box_min.x, sc[0].x, sc[1].x, sc[2].x}), 0, image.width() - 1);
-    box_min.y = std::clamp(std::min({box_min.y, sc[0].y, sc[1].y, sc[2].y}), 0, image.height() - 1);
-    box_max.x = std::clamp(std::max({box_max.x, sc[0].x, sc[1].x, sc[2].x}), 0, image.width() - 1);
-    box_max.y = std::clamp(std::max({box_max.y, sc[0].y, sc[1].y, sc[2].y}), 0, image.height() - 1);
+    box_min.x =
+        std::clamp(std::min({box_min.x, sc[0].x, sc[1].x, sc[2].x}), 0, image.get_width() - 1);
+    box_min.y =
+        std::clamp(std::min({box_min.y, sc[0].y, sc[1].y, sc[2].y}), 0, image.get_height() - 1);
+    box_max.x =
+        std::clamp(std::max({box_max.x, sc[0].x, sc[1].x, sc[2].x}), 0, image.get_width() - 1);
+    box_max.y =
+        std::clamp(std::max({box_max.y, sc[0].y, sc[1].y, sc[2].y}), 0, image.get_height() - 1);
 
     // 遍历边界框内像素点是否在三角形内
     Vec2i p;
@@ -471,7 +484,7 @@ void load_model_and_z_buffer()
             world_coords[j] = v;
         }
         // 计算三角形面的法向量
-        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
+        Vec3f n = cross(world_coords[2] - world_coords[0], world_coords[1] - world_coords[0]);
         n.normalize();
         // 计算法向量与平行光的夹角，决定了三角形面的亮度
         float intensity = n * light_dir;
@@ -486,6 +499,7 @@ void load_model_and_z_buffer()
             triangle3(screen_coords, world_coords, z_buffer, image, color);
         }
     }
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("african_head_z_buffer.tga");
     delete model;
     return;
@@ -528,7 +542,7 @@ public:
         V ret;
         for (int i = 0; i < dim; i++) {
             for (int j = 0; j < dim; j++) {
-                ret.raw[i] += m_[i][j] * vec.raw[j];
+                ret[i] += m_[i][j] * vec[j];
             }
         }
         return ret;
@@ -566,31 +580,6 @@ std::ostream &operator<<(std::ostream &cout, Matrix4<U> &rhs)
 }
 
 using Matrix4f = Matrix4<float>;
-
-template <class T>
-struct Vec4 {
-    union {
-        struct {
-            T x, y, z, w;
-        };
-        T raw[4];
-    };
-    Vec4() : x(0), y(0), z(0), w(0) {}
-    Vec4(T _x, T _y, T _z, T _w) : x(_x), y(_y), z(_z), w(_w) {}
-    Vec4<T> operator*(float f) const { return Vec4<T>(x * f, y * f, z * f, w * f); }
-    template <typename U>
-    friend std::ostream &operator<<(std::ostream &s, Vec4<U> &v);
-};
-
-template <typename U>
-std::ostream &operator<<(std::ostream &s, Vec4<U> &v)
-{
-    s << "(" << v.x << ", " << v.y << ", " << v.z << ", " << v.w << ")\n";
-    return s;
-}
-
-typedef Vec4<float> Vec4f;
-typedef Vec4<int> Vec4i;
 
 Matrix4f get_model_trans()
 {
@@ -636,7 +625,7 @@ void model_transformation()
             screen_coords[j] = {x, y};
             world_coords[j] = {v_model.x, v_model.y, v_model.z};
         }
-        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
+        Vec3f n = cross(world_coords[2] - world_coords[0], world_coords[1] - world_coords[0]);
         n.normalize();
         float intensity = n * light_dir;
         // 如果点乘大于 0，光源对该平面的照射方向与法向量同向
@@ -650,6 +639,7 @@ void model_transformation()
             triangle3(screen_coords, world_coords, z_buffer, image, color);
         }
     }
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("african_head_model_trans.tga");
     delete model;
     return;
@@ -659,7 +649,7 @@ Matrix4f get_view_trans(Vec3f camera, Vec3f front, Vec3f up)
 {
     // 注意这里是 面朝方向 叉乘 头顶方向，得到摄像机右手方向
     // 因此摄像机的坐标系基向量为（右，上，前），需将这三个基向量分别对齐 x轴，y轴，-z轴
-    Vec3f right = front ^ up;  // x
+    Vec3f right = cross(front, up);  // x
 
     // 摄像机位于 (1,0,0)，看向 -x 方向，头顶向 +y 方向
     // Vec3f camera = {1, 0, 0};
@@ -747,7 +737,7 @@ void view_transformation()
             screen_coords[j] = {x, y};
             world_coords[j] = {v_view.x, v_view.y, v_view.z};
         }
-        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
+        Vec3f n = cross(world_coords[2] - world_coords[0], world_coords[1] - world_coords[0]);
         n.normalize();
         float intensity = n * light_dir;
         // 如果点乘大于 0，光源对该平面的照射方向与法向量同向
@@ -761,6 +751,7 @@ void view_transformation()
             triangle3(screen_coords, world_coords, z_buffer, image, color);
         }
     }
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("african_head_view_trans.tga");
     delete model;
     return;
@@ -823,7 +814,7 @@ void viewport_transformation()
             screen_coords[j] = {(int)v_viewport.x, (int)v_viewport.y};
             world_coords[j] = {v_view.x, v_view.y, v_view.z};
         }
-        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
+        Vec3f n = cross(world_coords[2] - world_coords[0], world_coords[1] - world_coords[0]);
         n.normalize();
         float intensity = n * light_dir;
         if (intensity > 0) {
@@ -835,6 +826,7 @@ void viewport_transformation()
             triangle3(screen_coords, world_coords, z_buffer, image, color);
         }
     }
+    image.flip_vertically();  // 垂直翻转 左下角为原点
     image.write_tga_file("african_head_viewport_trans.tga");
     delete model;
     return;
