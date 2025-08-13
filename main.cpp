@@ -832,6 +832,99 @@ void viewport_transformation()
     return;
 }
 
+// 使用 uv 材质绘制
+void triangle4(Vec2i screen_coords[3], Vec3f world_coords[3],
+               std::vector<std::vector<float>> &z_buffer, TGAImage &image, Vec2f uv[3],
+               float intensity, Model &model)
+{
+    const auto &sc = screen_coords;
+    if (sc[0].y == sc[1].y && sc[0].y == sc[2].y) return;  // 为线段时不处理
+    // 计算边界框的范围，左下角起点坐标 box_min，右上角终点坐标 box_max
+    Vec2i box_min {image.get_width() - 1, image.get_height() - 1};
+    Vec2i box_max {0, 0};
+    box_min.x =
+        std::clamp(std::min({box_min.x, sc[0].x, sc[1].x, sc[2].x}), 0, image.get_width() - 1);
+    box_min.y =
+        std::clamp(std::min({box_min.y, sc[0].y, sc[1].y, sc[2].y}), 0, image.get_height() - 1);
+    box_max.x =
+        std::clamp(std::max({box_max.x, sc[0].x, sc[1].x, sc[2].x}), 0, image.get_width() - 1);
+    box_max.y =
+        std::clamp(std::max({box_max.y, sc[0].y, sc[1].y, sc[2].y}), 0, image.get_height() - 1);
+
+    // 遍历边界框内像素点是否在三角形内
+    Vec2i p;
+    const auto &wc = world_coords;
+    for (p.x = box_min.x; p.x <= box_max.x; p.x++) {
+        for (p.y = box_min.y; p.y <= box_max.y; p.y++) {
+            Vec3f vec = barycentric(sc[0], sc[1], sc[2], p);
+            if (vec.x < 0 || vec.y < 0 || vec.z < 0) continue;
+            // 计算重心坐标的 z
+            float z = vec.x * wc[0].z + vec.y * wc[1].z + vec.z * wc[2].z;
+            // 只处理该像素点 z 轴最前面的三角形面，即重心坐标 z 最大的三角形面
+            if (z < z_buffer[p.x][p.y]) continue;
+            z_buffer[p.x][p.y] = z;
+            // 计算 uv
+            Vec2f uv_p = uv[0] * vec.x + uv[1] * vec.y + uv[2] * vec.z;
+            TGAColor color = model.diffuse(uv_p);
+            color = color * intensity;
+            color[3] = 255;
+            image.set(p.x, p.y, color);
+        }
+    }
+    return;
+}
+void uv_mapping()
+{
+    Model *model = new Model("obj/african_head.obj");
+    constexpr int width = 800;
+    constexpr int height = 800;
+    TGAImage image(width, height, TGAImage::RGB);
+
+    Matrix4f model_trans;
+    model_trans.init_E();
+    // 摄像机位于 (0,0,1)，看向 -z 方向，头顶向 +y 方向
+    Vec3f camera = {0, 0, 1};  // x
+    Vec3f front = {0, 0, -1};  // -z
+    Vec3f up = {0, 1, 0};      // y
+    Matrix4f view_trans = get_view_trans(camera, front, up);
+    Matrix4f viewport_trans =
+        get_viewport_trans(width / 8, height / 8, width * 3 / 4, height * 3 / 4);
+
+    float lowest = std::numeric_limits<float>::lowest();
+    std::vector<std::vector<float>> z_buffer(width, std::vector<float>(height, lowest));
+    Vec3f light_dir = {0, 0, -1};
+    for (int i = 0; i < model->nfaces(); i++) {
+        std::vector<int> face = model->face(i);
+        Vec2i screen_coords[3];
+        Vec3f world_coords[3];
+        for (int j = 0; j < 3; j++) {
+            Vec3f v_origin = model->vert(face[j]);
+            // 转化为齐次坐标
+            Vec4f v_homo = Vec4f {v_origin.x, v_origin.y, v_origin.z, 1.0f};
+            // 模型变换，将物体放置在合适的位置
+            Vec4f v_model = model_trans * v_homo;
+            // 视图变换，从摄像机角度看到的视角
+            Vec4f v_view = view_trans * v_model;
+            // 视口变换，映射到屏幕像素
+            Vec4f v_viewport = viewport_trans * v_view;
+            screen_coords[j] = {(int)v_viewport.x, (int)v_viewport.y};
+            world_coords[j] = {v_view.x, v_view.y, v_view.z};
+        }
+        Vec3f n = cross(world_coords[2] - world_coords[0], world_coords[1] - world_coords[0]);
+        n.normalize();
+        float intensity = n * light_dir;
+        if (intensity > 0) {
+            // 获得三角形面的 3 个顶点的 uv 属性
+            Vec2f uv[3];
+            for (int k = 0; k < 3; k++) uv[k] = model->uv(i, k);
+            triangle4(screen_coords, world_coords, z_buffer, image, uv, intensity, *model);
+        }
+    }
+    image.flip_vertically();  // 垂直翻转 左下角为原点
+    image.write_tga_file("african_head_uv.tga");
+    delete model;
+    return;
+}
 int main(int argc, char **argv)
 {
     // lesson 1
@@ -848,10 +941,12 @@ int main(int argc, char **argv)
     load_model_and_light();
     // lesson 3
     load_model_and_z_buffer();
-    // lession 4
+    // lession 4 5
     model_transformation();
     view_transformation();
     // project_transformation();
     viewport_transformation();
+    // lession 6
+    uv_mapping();
     return 0;
 }
