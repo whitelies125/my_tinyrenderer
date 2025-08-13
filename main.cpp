@@ -4,6 +4,7 @@
 
 #include "geometry.h"
 #include "model.h"
+#include "our_gl.h"
 #include "tgaimage.h"
 
 // BGRA = blue green read alpha(不透明度)
@@ -873,6 +874,8 @@ void triangle4(Vec2i screen_coords[3], Vec3f world_coords[3],
     }
     return;
 }
+
+// 纹理映射
 void uv_mapping()
 {
     Model *model = new Model("obj/african_head.obj");
@@ -925,6 +928,78 @@ void uv_mapping()
     delete model;
     return;
 }
+
+struct GouraudShader : public IShader {
+public:
+    Model *model;
+    Vec3f light_dir;
+
+public:
+    Vec3f varying_intensity;      // written by vertex shader, read by fragment shader
+    mat<2, 3, float> varying_uv;  // same as above
+
+    virtual Vec4f vertex(int iface, int nthvert)
+    {
+        // 保存 uv 信息
+        varying_uv.set_col(nthvert, model->uv(iface, nthvert));
+        // 计算光照强度
+        varying_intensity[nthvert] = std::max(
+            0.f, model->normal(iface, nthvert) * light_dir);  // get diffuse lighting intensity
+        // gl_Vertex 模型文件中读出的坐标
+        Vec4f gl_Vertex = embed<4>(model->vert(iface, nthvert));  // read the vertex from .obj file
+        // 返回依次经过 model_trans、view_trans、project_trans、viewport_trans 的坐标
+        // 但这里我理解，教程是认为 model_trans，这里的 ModelView 实际上是 view_trans
+        return Viewport * Projection * ModelView * gl_Vertex;  // transform it to screen coordinates
+    }
+
+    virtual bool fragment(Vec3f bar, TGAColor &color)
+    {
+        float intensity = varying_intensity * bar;  // interpolate intensity for the current pixel
+        Vec2f uv = varying_uv * bar;                // interpolate uv for the current pixel
+        color = model->diffuse(uv) * intensity;     // well duh
+        return false;                               // no, we do not discard this pixel
+    }
+};
+
+// 着色器 shader
+void shader()
+{
+    Model *model = new Model("obj/african_head.obj");
+    constexpr int width = 800;
+    constexpr int height = 800;
+
+    Vec3f light_dir(1, 1, 1);
+    Vec3f camera(1, 1, 3);
+    Vec3f center(0, 0, 0);
+    Vec3f up(0, 1, 0);
+
+    lookat(camera, center, up);
+    viewport(width / 8, height / 8, width * 3 / 4, height * 3 / 4);
+    projection(-1.f / (camera - center).norm());
+    light_dir.normalize();
+
+    TGAImage image(width, height, TGAImage::RGB);
+    TGAImage zbuffer(width, height, TGAImage::GRAYSCALE);
+
+    GouraudShader shader;
+    shader.model = model;
+    shader.light_dir = light_dir;
+    for (int i = 0; i < model->nfaces(); i++) {
+        Vec4f screen_coords[3];
+        for (int j = 0; j < 3; j++) {
+            screen_coords[j] = shader.vertex(i, j);
+        }
+        triangle(screen_coords, shader, image, zbuffer);
+    }
+
+    image.flip_vertically();  // to place the origin in the bottom left corner of the image
+    zbuffer.flip_vertically();
+    zbuffer.write_tga_file("african_head_shader_zbuffer.tga");
+    image.write_tga_file("african_head_shader.tga");
+    delete model;
+    return;
+}
+
 int main(int argc, char **argv)
 {
     // lesson 1
@@ -948,5 +1023,6 @@ int main(int argc, char **argv)
     viewport_transformation();
     // lession 6
     uv_mapping();
+    shader();
     return 0;
 }
