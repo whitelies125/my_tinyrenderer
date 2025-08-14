@@ -948,7 +948,7 @@ public:
         // gl_Vertex 模型文件中读出的坐标
         Vec4f gl_Vertex = embed<4>(model->vert(iface, nthvert));  // read the vertex from .obj file
         // 返回依次经过 model_trans、view_trans、project_trans、viewport_trans 的坐标
-        // 但这里我理解，教程是认为 model_trans，这里的 ModelView 实际上是 view_trans
+        // 但这里我理解教程是认为没有 model_trans，所以我理解这里的 ModelView 实际上是 view_trans
         return Viewport * Projection * ModelView * gl_Vertex;  // transform it to screen coordinates
     }
 
@@ -1000,6 +1000,116 @@ void shader()
     return;
 }
 
+struct PhongShader : public IShader {
+public:
+    Model *model;
+    Vec3f light_dir;
+
+    mat<4, 4, float> mvp_trans;
+    mat<4, 4, float> norm_trans;  // 是 MVP 变换的逆矩阵的转置矩阵, norm_trans = ((PVM)^-1)^T
+
+public:
+    mat<2, 3, float> varying_uv;  // same as above
+
+    virtual Vec4f vertex(int iface, int nthvert)
+    {
+        // 保存 uv 信息
+        varying_uv.set_col(nthvert, model->uv(iface, nthvert));
+        // gl_Vertex 模型文件中读出的坐标
+        Vec4f gl_Vertex = embed<4>(model->vert(iface, nthvert));  // read the vertex from .obj file
+        // 返回依次经过 model_trans、view_trans、project_trans、viewport_trans 的坐标
+        // 但这里我理解教程是认为没有 model_trans，所以我理解这里的 ModelView 实际上是 view_trans
+        return Viewport * Projection * ModelView * gl_Vertex;  // transform it to screen coordinates
+    }
+
+    virtual bool fragment(Vec3f bar, TGAColor &color)
+    {
+        Vec2f uv = varying_uv * bar;  // interpolate uv for the current pixel
+
+        Vec3f norm_orgin = model->normal(uv);  // 从 uv 获得法向量
+        // 对原始法向量进行变换，使之与 MVP 变换后的三角形面仍然保持垂直
+        Vec3f n = proj<3>(norm_trans * embed<4>(norm_orgin)).normalize();  // 法向量
+
+        // 光照方向进行 MVP 变换，可以想象是对空间中的点光源进行变换，自然是进行与模型一样的MVP变换
+        Vec3f l = proj<3>(mvp_trans * embed<4>(light_dir)).normalize();  // 入射向量
+        // 反射方向，可由 n,l 向量计算出, r = 2 * (n*l) * n - l
+        // r 与 l 是关于 n 对称的，可以看作菱形的两边，n 为菱形中的对角线，r + l 方向即与 n 方向同向
+        // r + l = k*n; k 待定
+        // 而菱形的对角线等于 2 * 边长(|r| or |l|) * cos(alpha)
+        // r + l = 2 * (l*n) *n
+        Vec3f r = (n * (2.0f * (n * l)) - l).normalize();  // 反射向量
+
+        // 计算漫反射反射光强度
+        float diffuse_light = std::max(0.f, n * l);
+        // 计算镜面反射光强度
+        // 因为 MVP 变换后，摄像机位于原点，朝向 -z 方向，因此反射的强度只与反射向量与 +z
+        // 轴的夹角有关 因此 (0,0,1) * r = |r|cos(alpha) = r.z; 只取正数，即反射向量向 +z
+        // 方向，摄像机可见 uv 中获得的是对 cos(alpha) 进行 n 次幂运算来调整镜面反射的变化率
+        float specular_light = pow(std::max(r.z, 0.0f), model->specular(uv));
+
+        // 计算环境光强度
+        float ambient_light = 5;
+        color = model->diffuse(uv);
+        // 对最终的光照强度进行由 漫反射+镜面反射 的加权求和
+        // 加权系数自定义，但是通常而言加权系数之和应为 1，这里就按教程作者喜好来，和不为1吧
+        float k_diffuse = 1;
+        float k_specular = 0.6;
+        float k_ambient = 1;
+        for (int i = 0; i < 3; i++) {
+            // color[i] = std::min<float>(k_ambient * ambient_light, 255);
+            // color[i] = std::min<float>(color[i] * (k_diffuse * diffuse_light), 255);
+            // color[i] = std::min<float>(color[i] * (k_specular * specular_light), 255);
+            color[i] = std::min<float>(
+                k_ambient * ambient_light +
+                    color[i] * (k_diffuse * diffuse_light + k_specular * specular_light),
+                255);
+        }
+        return false;
+    }
+};
+
+// phong_shader
+// 环境光+漫反射光+镜面反射光
+void phong_shader()
+{
+    Model *model = new Model("obj/african_head.obj");
+    constexpr int width = 800;
+    constexpr int height = 800;
+
+    Vec3f light_dir(1, 1, 1);
+    Vec3f camera(1, 1, 3);
+    Vec3f center(0, 0, 0);
+    Vec3f up(0, 1, 0);
+
+    lookat(camera, center, up);
+    viewport(width / 8, height / 8, width * 3 / 4, height * 3 / 4);
+    projection(-1.f / (camera - center).norm());
+    light_dir.normalize();
+
+    TGAImage image(width, height, TGAImage::RGB);
+    TGAImage zbuffer(width, height, TGAImage::GRAYSCALE);
+
+    PhongShader shader;
+    shader.model = model;
+    shader.light_dir = light_dir;
+    shader.mvp_trans = Projection * ModelView;
+    shader.norm_trans = shader.mvp_trans.invert_transpose();
+    for (int i = 0; i < model->nfaces(); i++) {
+        Vec4f screen_coords[3];
+        for (int j = 0; j < 3; j++) {
+            screen_coords[j] = shader.vertex(i, j);
+        }
+        triangle(screen_coords, shader, image, zbuffer);
+    }
+
+    image.flip_vertically();  // to place the origin in the bottom left corner of the image
+    zbuffer.flip_vertically();
+    zbuffer.write_tga_file("african_head_phong_shader_zbuffer.tga");
+    image.write_tga_file("african_head_phong_shader.tga");
+    delete model;
+    return;
+}
+
 int main(int argc, char **argv)
 {
     // lesson 1
@@ -1024,5 +1134,6 @@ int main(int argc, char **argv)
     // lession 6
     uv_mapping();
     shader();
+    phong_shader();
     return 0;
 }
