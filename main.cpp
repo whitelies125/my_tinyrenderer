@@ -224,7 +224,7 @@ void load_model()
     // 这个顶点的坐标 x,y,z
     // f 1193/1240/1193 1180/1227/1180 1179/1226/1179
     // 前三个，意思是这三个 vertex 连线构成一个 face，序号从1开始，按文件从前往后出现的 v 顺序
-    Model *model = new Model("obj/african_head.obj");
+    Model *model = new Model("obj/african_head/african_head.obj");
     constexpr int width = 800;
     constexpr int height = 800;
     TGAImage image(width, height, TGAImage::RGB);
@@ -354,7 +354,7 @@ void lesson2_try2()
 // 加载模型，每个三角形面使用随机颜色绘制
 void load_model_and_random_color()
 {
-    Model *model = new Model("obj/african_head.obj");
+    Model *model = new Model("obj/african_head/african_head.obj");
     constexpr int width = 800;
     constexpr int height = 800;
     TGAImage image(width, height, TGAImage::RGB);
@@ -383,7 +383,7 @@ void load_model_and_random_color()
 // 添加平行光，计算每个三角形面的光强度
 void load_model_and_light()
 {
-    Model *model = new Model("obj/african_head.obj");
+    Model *model = new Model("obj/african_head/african_head.obj");
     constexpr int width = 800;
     constexpr int height = 800;
     TGAImage image(width, height, TGAImage::RGB);
@@ -462,7 +462,7 @@ void triangle3(Vec2i screen_coords[3], Vec3f world_coords[3],
 
 void load_model_and_z_buffer()
 {
-    Model *model = new Model("obj/african_head.obj");
+    Model *model = new Model("obj/african_head/african_head.obj");
     constexpr int width = 800;
     constexpr int height = 800;
     TGAImage image(width, height, TGAImage::RGB);
@@ -600,7 +600,7 @@ Matrix4f get_model_trans()
 // 模型变换
 void model_transformation()
 {
-    Model *model = new Model("obj/african_head.obj");
+    Model *model = new Model("obj/african_head/african_head.obj");
     constexpr int width = 800;
     constexpr int height = 800;
     TGAImage image(width, height, TGAImage::RGB);
@@ -703,7 +703,7 @@ Matrix4f get_view_trans(Vec3f camera, Vec3f front, Vec3f up)
 // 视角变换，摄像机变换
 void view_transformation()
 {
-    Model *model = new Model("obj/african_head.obj");
+    Model *model = new Model("obj/african_head/african_head.obj");
     constexpr int width = 800;
     constexpr int height = 800;
     TGAImage image(width, height, TGAImage::RGB);
@@ -780,7 +780,7 @@ Matrix4f get_viewport_trans(int x, int y, int w, int h)
 // 视口变换
 void viewport_transformation()
 {
-    Model *model = new Model("obj/african_head.obj");
+    Model *model = new Model("obj/african_head/african_head.obj");
     constexpr int width = 800;
     constexpr int height = 800;
     TGAImage image(width, height, TGAImage::RGB);
@@ -878,7 +878,7 @@ void triangle4(Vec2i screen_coords[3], Vec3f world_coords[3],
 // 纹理映射
 void uv_mapping()
 {
-    Model *model = new Model("obj/african_head.obj");
+    Model *model = new Model("obj/african_head/african_head.obj");
     constexpr int width = 800;
     constexpr int height = 800;
     TGAImage image(width, height, TGAImage::RGB);
@@ -964,7 +964,7 @@ public:
 // 着色器 shader
 void shader()
 {
-    Model *model = new Model("obj/african_head.obj");
+    Model *model = new Model("obj/african_head/african_head.obj");
     constexpr int width = 800;
     constexpr int height = 800;
 
@@ -1030,7 +1030,10 @@ public:
         // 对原始法向量进行变换，使之与 MVP 变换后的三角形面仍然保持垂直
         Vec3f n = proj<3>(norm_trans * embed<4>(norm_orgin)).normalize();  // 法向量
 
-        // 光照方向进行 MVP 变换，可以想象是对空间中的点光源进行变换，自然是进行与模型一样的MVP变换
+        // 光照方向进行 V 变换
+        // 我理解其实只需要进行 V 变换，但是教程这里写的是 MVP，
+        // 大概因为是教程 1. 教程里的M 实际上只是 V，2. 教程的 P 是简化的处理
+        // 这里按教程的写法来
         Vec3f l = proj<3>(mvp_trans * embed<4>(light_dir)).normalize();  // 入射向量
         // 反射方向，可由 n,l 向量计算出, r = 2 * (n*l) * n - l
         // r 与 l 是关于 n 对称的，可以看作菱形的两边，n 为菱形中的对角线，r + l 方向即与 n 方向同向
@@ -1072,7 +1075,7 @@ public:
 // 环境光+漫反射光+镜面反射光
 void phong_shader()
 {
-    Model *model = new Model("obj/african_head.obj");
+    Model *model = new Model("obj/african_head/african_head.obj");
     constexpr int width = 800;
     constexpr int height = 800;
 
@@ -1110,6 +1113,115 @@ void phong_shader()
     return;
 }
 
+struct TangentSpaceShader : public IShader {
+    Model *model;
+    Vec3f light_dir;
+
+    mat<2, 3, float> varying_uv;   // 三角形 uv 坐标，由顶点着色器写入，面片着色器读取
+    mat<4, 3, float> varying_tri;  // 三角形裁剪坐标，由顶点着色器写入，面片着色器读取
+    mat<3, 3, float> varying_nrm;  // 每个顶点的法线，给面片着色器进行插值
+    mat<3, 3, float> ndc_tri;      // 三角形的 NDC 坐标
+
+    virtual Vec4f vertex(int iface, int nthvert)
+    {
+        // 三个顶点的 uv 坐标
+        varying_uv.set_col(nthvert, model->uv(iface, nthvert));
+        // 三个顶点经过 MVP 逆转置变换后的法向量
+        // 这里 normal(iface, nthvert) 是从 .obj 文件中得到顶点的法向量，注意与 normal(uv) 区分
+        varying_nrm.set_col(nthvert, proj<3>((Projection * ModelView).invert_transpose() *
+                                             embed<4>(model->normal(iface, nthvert), 0.f)));
+        // 顶点经过MVP变换后的坐标
+        Vec4f gl_Vertex = Projection * ModelView * embed<4>(model->vert(iface, nthvert));
+        // 三个顶点经过MVP变换后的坐标
+        varying_tri.set_col(nthvert, gl_Vertex);
+        // 透视除法，得到三个顶点的 ndc 坐标
+        ndc_tri.set_col(nthvert, proj<3>(gl_Vertex / gl_Vertex[3]));
+        return gl_Vertex;
+    }
+
+    virtual bool fragment(Vec3f bar, TGAColor &color)
+    {
+        // 本次像素点的，由三顶点的 MVP 逆转置变换后的法向量加权平均得到的法向量
+        Vec3f bn = (varying_nrm * bar).normalize();
+        // 本次像素点的加权平均 uv 坐标
+        Vec2f uv = varying_uv * bar;
+
+        // E1 = delta(u_AB) * T + delata(v_AB) * B
+        // E2 = delta(u_AC) * T + delata(v_AC) * B
+        // T = (delta(v_AB) * E2 - delta(v_AC) * E1) / (delta(v_AB) * delta(u_AC) - delta(v_AC) *
+        // delta(u_AB))
+        mat<3, 3, float> A;
+        // E1 = AB
+        A[0] = ndc_tri.col(1) - ndc_tri.col(0);
+        // E2 = AC
+        A[1] = ndc_tri.col(2) - ndc_tri.col(0);
+        // N = 法向量
+        A[2] = bn;
+
+        // 求逆
+        mat<3, 3, float> AI = A.invert();
+
+        // (u_AB, u_AC, 0)
+        Vec3f i =
+            AI * Vec3f(varying_uv[0][1] - varying_uv[0][0], varying_uv[0][2] - varying_uv[0][0], 0);
+        // (v_AB, v_AC, 0)
+        Vec3f j =
+            AI * Vec3f(varying_uv[1][1] - varying_uv[1][0], varying_uv[1][2] - varying_uv[1][0], 0);
+
+        // TBN 矩阵
+        mat<3, 3, float> B;
+        B.set_col(0, i.normalize());  // T
+        B.set_col(1, j.normalize());  // B
+        B.set_col(2, bn);             // N
+
+        // 这里 model->normal(uv) 传入 uv 获得的是切线空间法线贴图文件中提供的向量
+        // 与 TBN 矩阵相乘，得到最终用于计算光照的法向量
+        Vec3f n = (B * model->normal(uv)).normalize();
+
+        float diff = std::max(0.f, n * light_dir);
+        color = model->diffuse(uv) * diff;
+
+        return false;
+    }
+};
+
+// 切线空间法线贴图
+void tangent_space_normal_mapping()
+{
+    Model *model = new Model("obj/african_head/african_head.obj", 1);
+    constexpr int width = 800;
+    constexpr int height = 800;
+
+    Vec3f light_dir(1, 1, 1);
+    Vec3f camera(1, 1, 3);
+    Vec3f center(0, 0, 0);
+    Vec3f up(0, 1, 0);
+
+    lookat(camera, center, up);
+    viewport(width / 8, height / 8, width * 3 / 4, height * 3 / 4);
+    projection(-1.f / (camera - center).norm());
+    light_dir = proj<3>((Projection * ModelView * embed<4>(light_dir, 0.f))).normalize();
+
+    TGAImage image(width, height, TGAImage::RGB);
+    float lowest = std::numeric_limits<float>::lowest();
+    std::vector<std::vector<float>> z_buffer(width, std::vector<float>(height, lowest));
+
+    TangentSpaceShader shader;
+    shader.model = model;
+    shader.light_dir = light_dir;
+    for (int i = 0; i < model->nfaces(); i++) {
+        for (int j = 0; j < 3; j++) {
+            shader.vertex(i, j);
+        }
+        triangle_tangent_space(shader.varying_tri, shader, image, z_buffer);
+    }
+
+    image.flip_vertically();  // to place the origin in the bottom left corner of the image
+    image.write_tga_file("african_head_tangent_space.tga");
+    delete model;
+    return;
+}
+
 int main(int argc, char **argv)
 {
     // lesson 1
@@ -1135,5 +1247,7 @@ int main(int argc, char **argv)
     uv_mapping();
     shader();
     phong_shader();
+    // lession 6bis
+    tangent_space_normal_mapping();
     return 0;
 }

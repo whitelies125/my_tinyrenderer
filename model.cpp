@@ -3,7 +3,7 @@
 #include <sstream>
 #include "model.h"
 
-Model::Model(const char *filename) : verts_(), faces_(), norms_(), uv_(), diffusemap_(), normalmap_(), specularmap_() {
+Model::Model(const char *filename, int norm_type) : verts_(), faces_(), norms_(), uv_(), diffusemap_(), normalmap_(), specularmap_() {
     std::ifstream in;
     in.open (filename, std::ifstream::in);
     if (in.fail()) return;
@@ -40,7 +40,10 @@ Model::Model(const char *filename) : verts_(), faces_(), norms_(), uv_(), diffus
     }
     std::cerr << "# v# " << verts_.size() << " f# "  << faces_.size() << " vt# " << uv_.size() << " vn# " << norms_.size() << std::endl;
     load_texture(filename, "_diffuse.tga", diffusemap_);
-    load_texture(filename, "_nm.tga",      normalmap_);
+    if (norm_type == 0) // 模型空间法线贴图
+        load_texture(filename, "_nm.tga",      normalmap_);
+    else // 切线空间法线贴图
+        load_texture(filename, "_nm_tangent.tga",      normalmap_);
     load_texture(filename, "_spec.tga",    specularmap_);
 }
 
@@ -105,4 +108,3 @@ Vec3f Model::normal(int iface, int nthvert) {
     int idx = faces_[iface][nthvert][2];
     return norms_[idx].normalize();
 }
-

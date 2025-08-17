@@ -16,7 +16,7 @@ private:
     TGAImage specularmap_;
     void load_texture(std::string filename, const char *suffix, TGAImage &img);
 public:
-    Model(const char *filename);
+    Model(const char *filename, int norm_type = 0);
     ~Model();
     int nverts();
     int nfaces();
@@ -30,4 +30,3 @@ public:
     std::vector<int> face(int idx);
 };
 #endif //__MODEL_H__
-
