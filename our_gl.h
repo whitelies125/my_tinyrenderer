@@ -20,5 +20,6 @@ struct IShader {
 
 void triangle(Vec4f *pts, IShader &shader, TGAImage &image, TGAImage &zbuffer);
 void triangle_tangent_space(mat<4,3,float> &clipc, IShader &shader, TGAImage &image, std::vector<std::vector<float>> &z_buffer);
+void triangle(Vec4f *pts, IShader &shader, TGAImage &image, std::vector<std::vector<float>> &zbuffer);
 
 #endif //__OUR_GL_H__

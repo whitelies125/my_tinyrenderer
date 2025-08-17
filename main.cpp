@@ -1222,6 +1222,208 @@ void tangent_space_normal_mapping()
     return;
 }
 
+struct DepthShader : public IShader {
+    Model *model;
+    Vec3f light_dir;
+
+    mat<3, 3, float> varying_tri;
+
+    DepthShader() : varying_tri() {}
+
+    virtual Vec4f vertex(int iface, int nthvert)
+    {
+        Vec4f gl_Vertex = embed<4>(model->vert(iface, nthvert));
+        gl_Vertex = Viewport * Projection * ModelView * gl_Vertex;
+        varying_tri.set_col(nthvert, proj<3>(gl_Vertex / gl_Vertex[3]));
+        return gl_Vertex;
+    }
+
+    virtual bool fragment(Vec3f bar, TGAColor &color)
+    {
+        Vec3f p = varying_tri * bar;
+        color = TGAColor(255, 255, 255) * (p.z / depth);
+        return false;
+    }
+};
+
+struct ShadowShader : public IShader {
+    Model *model;
+    Vec3f light_dir;
+    std::vector<std::vector<float>> shadow_buffer;
+
+    mat<3, 3, float> varying_nrm;  // 每个顶点的法线，给面片着色器进行插值
+    mat<3, 3, float> ndc_tri;      // 三角形的 NDC 坐标
+
+    mat<4, 4, float> uniform_M;        //  Projection*ModelView
+    mat<4, 4, float> uniform_MIT;      // (Projection*ModelView).invert_transpose()
+    mat<4, 4, float> uniform_Mshadow;  // transform framebuffer screen coordinates to shadowbuffer
+                                       // screen coordinates
+    mat<2, 3, float> varying_uv;  // triangle uv coordinates, written by the vertex shader, read by
+                                  // the fragment shader
+    mat<3, 3, float>
+        varying_tri;  // triangle coordinates before Viewport transform, written by VS, read by FS
+
+    ShadowShader(Matrix M, Matrix MIT, Matrix MS)
+        : uniform_M(M), uniform_MIT(MIT), uniform_Mshadow(MS), varying_uv(), varying_tri()
+    {}
+
+    virtual Vec4f vertex(int iface, int nthvert)
+    {
+        varying_uv.set_col(nthvert, model->uv(iface, nthvert));
+        Vec4f gl_Vertex = Viewport * Projection * ModelView * embed<4>(model->vert(iface, nthvert));
+        varying_tri.set_col(nthvert, proj<3>(gl_Vertex / gl_Vertex[3]));
+
+        varying_nrm.set_col(nthvert, proj<3>((Projection * ModelView).invert_transpose() *
+                                             embed<4>(model->normal(iface, nthvert), 0.f)));
+        ndc_tri.set_col(nthvert, proj<3>(gl_Vertex / gl_Vertex[3]));
+        return gl_Vertex;
+    }
+
+    virtual bool fragment(Vec3f bar, TGAColor &color)
+    {
+        // 转换为 shadow_buffer 中的对应点 sb_p = shadow_buffer_point
+        Vec4f sb_p = uniform_Mshadow * embed<4>(varying_tri * bar);
+        sb_p = sb_p / sb_p[3];
+        // 如果未被遮挡，则为1；否则为 0.3. 用于后面绘制阴影
+        // float shadow = .3 + .7 * (shadow_buffer[sb_p.x][sb_p.y] < sb_p[2]);
+        // magic coeff to avoid z-fighting
+        float shadow = .3 + .7 * (shadow_buffer[sb_p.x][sb_p.y] < sb_p[2] + 43.34);
+        // 获得加权uv坐标
+        Vec2f uv = varying_uv * bar;  // interpolate uv for the current pixel
+        // 计算世界坐标法向量
+        Vec3f n = proj<3>(uniform_MIT * embed<4>(model->normal(uv))).normalize();
+        // 计算入射向量
+        Vec3f l = proj<3>(uniform_M * embed<4>(light_dir)).normalize();
+        // 计算反射向量
+        Vec3f r = (n * (n * l * 2.f) - l).normalize();
+        // 计算镜面反射
+        float spec = pow(std::max(r.z, 0.0f), model->specular(uv));
+        // 计算漫反射
+        float diff = std::max(0.f, n * l);
+        // 计算漫反射
+        float ambient = 20;
+        // 从材质获得颜色
+        TGAColor c = model->diffuse(uv);
+        for (int i = 0; i < 3; i++)
+            color[i] = std::min<float>(ambient + c[i] * shadow * (1.2 * diff + .6 * spec), 255);
+        return false;
+    }
+
+    // 使用切线空间法线贴图的阴影映射
+    virtual bool fragment_deleteme(Vec3f bar, TGAColor &color)
+    {
+        // 本次像素点世界坐标法向量
+        Vec3f bn = (varying_nrm * bar).normalize();
+        // 本次像素点的加权平均 uv 坐标
+        Vec2f uv = varying_uv * bar;
+
+        mat<3, 3, float> A;
+        A[0] = ndc_tri.col(1) - ndc_tri.col(0);  // E1 = AB
+        A[1] = ndc_tri.col(2) - ndc_tri.col(0);  // E2 = AC
+        A[2] = bn;                               // N = 法向量
+
+        mat<3, 3, float> AI = A.invert();  // 求逆
+
+        // (u_AB, u_AC, 0)
+        Vec3f i =
+            AI * Vec3f(varying_uv[0][1] - varying_uv[0][0], varying_uv[0][2] - varying_uv[0][0], 0);
+        // (v_AB, v_AC, 0)
+        Vec3f j =
+            AI * Vec3f(varying_uv[1][1] - varying_uv[1][0], varying_uv[1][2] - varying_uv[1][0], 0);
+
+        // TBN 矩阵
+        mat<3, 3, float> B;
+        B.set_col(0, i.normalize());  // T
+        B.set_col(1, j.normalize());  // B
+        B.set_col(2, bn);             // N
+
+        // 这里 model->normal(uv) 传入 uv 获得的是切线空间法线贴图文件中提供的向量
+        // 与 TBN 矩阵相乘，得到最终用于计算光照的法向量
+        Vec3f n = (B * model->normal(uv)).normalize();
+
+        float diff = std::max(0.f, n * light_dir);
+        color = model->diffuse(uv) * diff;
+
+        // 转换为 shadow_buffer 中的对应点 sb_p = shadow_buffer_point
+        Vec4f sb_p = uniform_Mshadow * embed<4>(varying_tri * bar);
+        sb_p = sb_p / sb_p[3];
+        // 如果未被遮挡，则为1；否则为 0.3. 用于后面绘制阴影
+        // float shadow = .3 + .7 * (shadow_buffer[sb_p.x][sb_p.y] < sb_p[2]);
+        // magic coeff to avoid z-fighting
+        float shadow = .3 + .7 * (shadow_buffer[sb_p.x][sb_p.y] < sb_p[2] + 43.34);
+        color = color * shadow;
+        return false;
+    }
+};
+
+void shadow_mapping()
+{
+    Model *model = new Model("obj/african_head/african_head.obj", 1);
+    constexpr int width = 800;
+    constexpr int height = 800;
+
+    Vec3f light_dir(2, 2, 1);
+    Vec3f camera(1, 1, 3);
+    Vec3f center(0, 0, 0);
+    Vec3f up(0, 1, 0);
+
+    float lowest = std::numeric_limits<float>::lowest();
+    std::vector<std::vector<float>> shadow_buffer(width, std::vector<float>(height, lowest));
+    {
+        // 设置视角位置为光源位置，为了计算光源视角下的遮挡
+        lookat(light_dir, center, up);
+        viewport(width / 8, height / 8, width * 3 / 4, height * 3 / 4);
+        projection(0);
+        light_dir.normalize();
+
+        TGAImage image(width, height, TGAImage::RGB);
+
+        DepthShader shader;
+        shader.model = model;
+        shader.light_dir = light_dir;
+        for (int i = 0; i < model->nfaces(); i++) {
+            Vec4f screen_coords[3];
+            for (int j = 0; j < 3; j++) {
+                screen_coords[j] = shader.vertex(i, j);
+            }
+            triangle(screen_coords, shader, image, shadow_buffer);
+        }
+
+        image.flip_vertically();
+        image.write_tga_file("african_head_shadow_buffer.tga");
+    }
+
+    Matrix M = Viewport * Projection * ModelView;
+    {
+        // 从摄像机视角下看去
+        lookat(camera, center, up);
+        viewport(width / 8, height / 8, width * 3 / 4, height * 3 / 4);
+        projection(-1.f / (camera - center).norm());
+        light_dir.normalize();
+
+        TGAImage image_with_shadow(width, height, TGAImage::RGB);
+        float lowest = std::numeric_limits<float>::lowest();
+        std::vector<std::vector<float>> z_buffer(width, std::vector<float>(height, lowest));
+
+        ShadowShader shadow_shader(ModelView, (Projection * ModelView).invert_transpose(),
+                                   M * (Viewport * Projection * ModelView).invert());
+        shadow_shader.model = model;
+        shadow_shader.light_dir = light_dir;
+        shadow_shader.shadow_buffer = shadow_buffer;
+        for (int i = 0; i < model->nfaces(); i++) {
+            Vec4f screen_coords[3];
+            for (int j = 0; j < 3; j++) {
+                screen_coords[j] = shadow_shader.vertex(i, j);
+            }
+            triangle(screen_coords, shadow_shader, image_with_shadow, z_buffer);
+        }
+        image_with_shadow.flip_vertically();
+        image_with_shadow.write_tga_file("african_head_shadow.tga");
+    }
+    delete model;
+    return;
+}
+
 int main(int argc, char **argv)
 {
     // lesson 1
@@ -1249,5 +1451,7 @@ int main(int argc, char **argv)
     phong_shader();
     // lession 6bis
     tangent_space_normal_mapping();
+    // lession 7
+    shadow_mapping();
     return 0;
 }
